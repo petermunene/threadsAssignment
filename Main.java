@@ -1,5 +1,47 @@
+import java.sql.*;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.ArrayList;
+
+class database {
+    private static final String URL = "jdbc:mysql://localhost:3306/bank_database";
+    private static final String USER = "root";
+    private static final String PASSWORD = "Z3n1thste3l!";//use your host password here
+
+    public static void log(int accountId, String customer, String action, int amount, int new_balance) {
+        //define the query structure.
+        String updateSql = "UPDATE accounts SET balance = ? WHERE account_id = ?";
+        String insertSql = "INSERT INTO transactions (account_id, customer_name, tx_type, amount, balance_after) VALUES (?, ?, ?, ?, ?)";
+
+        try (Connection con = DriverManager.getConnection(URL, USER, PASSWORD)) {
+            con.setAutoCommit(false);//prevents updating of the db until told so using commit()
+
+            try (
+                PreparedStatement upStmt = con.prepareStatement(updateSql);
+                PreparedStatement inStmt = con.prepareStatement(insertSql)
+            ) {
+                if (!"INQUIRY".equals(action)) {
+                    upStmt.setInt(1, new_balance);
+                    upStmt.setInt(2, accountId);
+                    upStmt.executeUpdate();
+                }
+
+                inStmt.setInt(1, accountId);
+                inStmt.setString(2, customer);
+                inStmt.setString(3, action);
+                inStmt.setInt(4, amount);
+                inStmt.setInt(5, new_balance);
+                inStmt.executeUpdate();
+
+                con.commit();//the release now it can update if no errors
+            } catch (SQLException e) {
+                con.rollback();//if any errors it will jump to this preventing erroneous entries
+                System.out.println("DB Rollback: " + e.getMessage());
+            }
+        } catch (SQLException e) { //if connection fails
+            System.out.println("DB Error: " + e.getMessage());
+        }
+    }
+}
 // Using synchronization
 class BankAccount {
     private int balance = 100000;
@@ -99,6 +141,7 @@ class ReentrantLockBankAccount{
             }
             balance+=amount;
             audits.add(Thread.currentThread().getName()+" successfully deposited: "+amount+". Your new balance is: "+balance);
+            database.log(this.id, Thread.currentThread().getName(), "DEPOSIT",amount, balance);
         }finally{
             lock.unlock();
         }
@@ -112,6 +155,8 @@ class ReentrantLockBankAccount{
             }
             balance-=amount;
             audits.add(Thread.currentThread().getName()+" successfully withdraw: "+amount+". Your new balance is: "+balance);
+            database.log(this.id, Thread.currentThread().getName(),"WITHDRAW", amount, balance);
+            
         } finally{
             lock.unlock();
         }
@@ -131,8 +176,9 @@ class ReentrantLockBankAccount{
                 balance-=amount;
                 reciever.balance+=amount;
                 audits.add(Thread.currentThread().getName()+" successfully transferred: "+amount+". Your new balance is: "+balance);
-
+                database.log(this.id, Thread.currentThread().getName(), "TRANSFER_OUT", amount, balance);
                 reciever.audits.add(Thread.currentThread().getName()+" successfully deposited: "+amount+". Your new balance is: "+reciever.balance);
+                database.log(reciever.id, Thread.currentThread().getName(), "DEPOSITED", amount, balance);
             }finally{
                 second.lock.unlock();
             }
@@ -142,6 +188,7 @@ class ReentrantLockBankAccount{
         lock.lock();
         try{
             System.out.println("Final account Balance: "+balance);
+            database.log(this.id, Thread.currentThread().getName(), "INQUIRY", 0, balance);
         }finally{
             lock.unlock();
         }
@@ -251,4 +298,3 @@ public class Main{
 
     }
 }
-
